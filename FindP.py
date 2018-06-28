@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.table import Table
 import glob
+import pandas as pd
 
 dir = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28610/'
 file = 'hlsp_everest_k2_llc_229228610-c08_kepler_v2.0_lc.fits'
@@ -10,23 +11,28 @@ fileLis = glob.glob('/Volumes/Zoe Bell Backup/everest/c08/229200000/*/*.fits')
 goodFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28988/hlsp_everest_k2_llc_229228988-c08_kepler_v2.0_lc.fits'
 badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28967/hlsp_everest_k2_llc_229228967-c08_kepler_v2.0_lc.fits'
 
-def findMultipleP(files, gen_min_period = 0.1, gen_max_period = 30):
+def findMultipleP(files, name, gen_Plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30):
     '''
-    Takes a list of file names for .fits files from the Everest K2 data, 
-    and optionally the minimum and maximum periods you want to look for.
+    Takes a list of file names for .fits files from the Everest K2 data, and optionally
+    whether you want plots saved, the file type you want them saved as, and the minimum and maximum periods you want to look for.
     Returns the output of findP for each file in a list.
     '''
     lis = []
     for file_name in files:
-        lis.append(findP(file_name, min_period=gen_min_period, max_period=gen_max_period))
-    return lis
+        lis.append(findP(file_name, plots=gen_Plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
+    output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Max Power','False Alarm Prob'])
+    output.to_csv('/Volumes/Zoe Bell Backup/FindPOutput/' + name + '.csv')
+    #return output
 
-def findP(file_name, plots=False, min_period = 0.1, max_period = 30):
+def findP(file_name, plots=False, file_type='.png', min_period = 0.1, max_period = 30):
     '''
     Takes the file name of a .fits file from the Everest K2 data, 
-    and optionally whether you want plots printed and the minimum and maximum periods you want to look for.
-    Returns the period that best fits the corrected flux data in that range and the associated false alarm probability.
+    and optionally whether you want a plot saved, the file type you want it saved as, and the minimum and maximum periods you want to look for.
+    Returns the file name, period that best fits the corrected flux data in that range, the power at that period, and the associated false alarm probability.
     '''
+    start = file_name.rfind('/') + 1
+    name = file_name[start:-5]
+
     data = Table.read(file_name, format='fits')
     ok = np.where((data['QUALITY']==0) & (np.isfinite(data['TIME'])) & (np.isfinite(data['FCOR']) & (np.isfinite(data['FRAW_ERR']))))
 
@@ -36,16 +42,21 @@ def findP(file_name, plots=False, min_period = 0.1, max_period = 30):
 
     ls = LombScargle(t, fcor, frawErr)
     freq, power = ls.autopower(minimum_frequency=1/max_period, maximum_frequency=1/min_period)
+    best_freq = freq[np.argmax(power)]
+    max_power = np.max(power)
+    
     if(plots):
+        plt.figure(figsize=(10,7))
+
+        plt.subplot(211)
         plt.plot(1/freq, power)
-        #plt.xscale('log')
         plt.title('Periodogram')
         plt.xlabel('Period')
         plt.ylabel('Power')
-        plt.show()
-    
-    best_freq = freq[np.argmax(power)]
-    if(plots):
+        plt.annotate('best period', xy=(1/best_freq, max_power), xytext=(1/best_freq*0.5, max_power*0.9), 
+                    arrowprops=dict(facecolor='black', width=1, headwidth=5))
+
+        plt.subplot(212)
         t_fit = np.linspace(np.min(t),np.max(t)) # make just select first and last
         f_fit = LombScargle(t, fcor, frawErr).model(t_fit, best_freq)
         plt.plot(t, fcor)
@@ -53,12 +64,24 @@ def findP(file_name, plots=False, min_period = 0.1, max_period = 30):
         plt.title('Comparison of Data and Model')
         plt.xlabel('Time')
         plt.ylabel('Flux')
-        plt.show()
 
-    return [1/best_freq, ls.false_alarm_probability(np.max(power))]
+        plt.suptitle(name)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.9)
+        plt.savefig('PlotOutputs/' + name + file_type, dpi=150)
+        plt.close()
+
+    return [name, 1/best_freq, max_power, ls.false_alarm_probability(max_power)]
 
 
+# pandas to output file (to_csv)
+# output=pd.DataFrame(lis) # name cols
+# output.to_csv()
 
+# add label to periodogram at peak, name and lable /... .fitz/png, make two-panel figure (subplot)
+# l = kdjf('/)
+# name[l[-1]+1:-4]+'.png' (make ftype a variable)
+# plt.figure(figsize(optional,takes x and y inches)) --stuff-- plt.savefig(name) plt.close()
 
 # panda.rolling rolling median; import glob.glob as glob to read in multiple files
 # create function(file name) return period and uncertainty/power, optional args plots=False, smooth window=10, period range
