@@ -9,20 +9,21 @@ dir = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28610/'
 file = 'hlsp_everest_k2_llc_229228610-c08_kepler_v2.0_lc.fits'
 fileLis = glob.glob('/Volumes/Zoe Bell Backup/everest/c08/229200000/*/*.fits')
 goodFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28988/hlsp_everest_k2_llc_229228988-c08_kepler_v2.0_lc.fits'
-badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28967/hlsp_everest_k2_llc_229228967-c08_kepler_v2.0_lc.fits'
+badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28995/hlsp_everest_k2_llc_229228995-c08_kepler_v2.0_lc.fits'
+#badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28967/hlsp_everest_k2_llc_229228967-c08_kepler_v2.0_lc.fits'
 
 def findMultipleP(files, name, gen_Plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30):
     '''
     Takes a list of file names for .fits files from the Everest K2 data, and optionally
     whether you want plots saved, the file type you want them saved as, and the minimum and maximum periods you want to look for.
-    Returns the output of findP for each file in a list.
+    Returns the output of findP for each file in a list and saves them in a .csv file.
     '''
     lis = []
     for file_name in files:
         lis.append(findP(file_name, plots=gen_Plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
     output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Max Power','False Alarm Prob'])
     output.to_csv('/Volumes/Zoe Bell Backup/FindPOutput/' + name + '.csv')
-    #return output
+    return output
 
 def findP(file_name, plots=False, file_type='.png', min_period = 0.1, max_period = 30):
     '''
@@ -73,6 +74,9 @@ def findP(file_name, plots=False, file_type='.png', min_period = 0.1, max_period
 
     return [name, 1/best_freq, max_power, ls.false_alarm_probability(max_power)]
 
+# put stuff to GitHub for prob problem
+# autocorrelation func (ACF) in astropy? scipy.correlate2d or something (looking for first local max > 0.2 days),
+# return period and height of ACF output
 
 # pandas to output file (to_csv)
 # output=pd.DataFrame(lis) # name cols
