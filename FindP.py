@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from astropy.table import Table
 import glob
 import pandas as pd
+import scipy.signal as sig
+from astropy.convolution import convolve, Box1DKernel
 
 dir = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28610/'
 file = 'hlsp_everest_k2_llc_229228610-c08_kepler_v2.0_lc.fits'
@@ -11,8 +13,9 @@ fileLis = glob.glob('/Volumes/Zoe Bell Backup/everest/c08/229200000/*/*.fits')
 goodFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28988/hlsp_everest_k2_llc_229228988-c08_kepler_v2.0_lc.fits'
 badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28995/hlsp_everest_k2_llc_229228995-c08_kepler_v2.0_lc.fits'
 #badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28967/hlsp_everest_k2_llc_229228967-c08_kepler_v2.0_lc.fits'
+okayFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28386/hlsp_everest_k2_llc_229228386-c08_kepler_v2.0_lc.fits'
 
-def findMultipleP(files, name, gen_Plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30):
+def findMultipleP(files, name, gen_plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30):
     '''
     Takes a list of file names for .fits files from the Everest K2 data, and optionally
     whether you want plots saved, the file type you want them saved as, and the minimum and maximum periods you want to look for.
@@ -20,7 +23,7 @@ def findMultipleP(files, name, gen_Plots=False, gen_file_type='.png', gen_min_pe
     '''
     lis = []
     for file_name in files:
-        lis.append(findP(file_name, plots=gen_Plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
+        lis.append(findP(file_name, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
     output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Max Power','False Alarm Prob'])
     output.to_csv('/Volumes/Zoe Bell Backup/FindPOutput/' + name + '.csv')
     return output
@@ -73,6 +76,100 @@ def findP(file_name, plots=False, file_type='.png', min_period = 0.1, max_period
         plt.close()
 
     return [name, 1/best_freq, max_power, ls.false_alarm_probability(max_power)]
+
+def ACFfindMultipleP(files, name, gen_plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30):
+    '''Similar to findMultipleP but uses autocorrelation instead of Lomb-Scargle.''' # doesn't produce data file yet
+    lis = []
+    for file_name in files:
+        lis.append(ACFfindP(file_name, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
+    output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Max Autocorrelation'])
+    #output.to_csv('/Volumes/Zoe Bell Backup/ACFfindPOutput/' + name + '.csv')
+    return output
+
+def ACFfindP(file_name, plots=False, file_type='.png', min_period = 0.1, max_period = 30):
+    '''Similar to findP but uses autocorrelation instead of Lomb-Scargle.'''
+    start = file_name.rfind('/') + 1
+    name = file_name[start:-5]
+
+    data = Table.read(file_name, format='fits')
+    ok = np.where((data['QUALITY']==0) & (np.isfinite(data['TIME'])) & (np.isfinite(data['FCOR']) & (np.isfinite(data['FRAW_ERR']))))
+
+    t = np.array(data['TIME'][ok])
+    fcor = list(data['FCOR'][ok])
+    fcor_median = fcor-np.median(fcor)
+
+    N = len(fcor)
+    t_step = np.nanmedian(t[1:]-t[0:-1])
+    t_range = np.arange(N)*t_step
+
+    arr = sig.correlate(fcor_median,fcor_median, mode='full')
+    ACF = arr[N-1:]
+
+    okP = np.where(((t_range>min_period) & (t_range<max_period)))
+    t_search = t_range[okP]
+    ACF_search = ACF[okP]
+
+    #box_width = findWidthAtHalfMax(t_search, ACF_search)
+    #print(box_width)
+
+    #ACF_search = convolve(ACF_search, Box1DKernel(box_width*2))
+    ACF_search = convolve(ACF_search, Box1DKernel(100)) # 200 good
+
+    #peaks = sig.argrelmax(np.array([t_search, ACF_search]))
+    #peaks = sig.find_peaks(ACF_search, threshold=np.max(ACF_search)/100)
+    #peaks = sig.find_peaks(ACF_search, prominence=100000) #is this always going to be a good prominence threshold? (nope)
+    #peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/10)
+    peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/100)
+    first_peak = peaks[0]
+    best_period = t_search[first_peak]
+    max_ACF = ACF[first_peak]
+
+    if(plots):
+        plt.figure(figsize=(10,7))
+
+        plt.subplot(211)
+        plt.title('Unsmoothed')
+        plt.xlabel('Time Shift')
+        plt.ylabel('Autocorrelation')
+        plt.plot(t_range, ACF)
+
+        plt.subplot(212)
+        plt.title('Smoothed')
+        plt.xlabel('Time Shift')
+        plt.ylabel('Autocorrelation')
+        plt.plot(t_search, ACF_search)
+
+        formated_periods = []
+        for n in best_period[:10]:
+            formated_periods.append(format(n, '.2f'))
+
+        plt.suptitle(formated_periods)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.9)
+        plt.savefig('ACFPlotOutputs/' + name + file_type, dpi=150)
+        plt.close()
+
+    return [name, best_period, max_ACF]
+
+def findWidthAtHalfMax(t_search, ACF_search):
+    max = ACF_search[0]
+    index = 0
+    for i in range(len(ACF_search)):
+        if ACF_search[i] < 0.5*max:
+            index = i
+            break
+    return t_search[index]
+
+# write func that calcs derivs and finds zeros and neg curvature
+# boxcar smooth (running average) for gross ones
+# use full width at half max for box size
+# look at 2013 paper for how to use ACF (use same limits)
+# save plot files
+
+# N = npsize(fcor)
+# ACF = arr[N:]
+# np.nanmedian(t[1:]-t[0:-1])
+# tan = np.arange(N)*av. time step
 
 # put stuff to GitHub for prob problem
 # autocorrelation func (ACF) in astropy? scipy.correlate2d or something (looking for first local max > 0.2 days),
