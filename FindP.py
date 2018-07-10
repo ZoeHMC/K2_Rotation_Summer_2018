@@ -5,6 +5,7 @@ from astropy.table import Table
 import glob
 import pandas as pd
 import scipy.signal as sig
+import scipy.stats as stats
 from astropy.convolution import convolve, Box1DKernel
 
 dir = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28610/'
@@ -14,6 +15,8 @@ goodFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28988/hlsp_everest_k2
 badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28995/hlsp_everest_k2_llc_229228995-c08_kepler_v2.0_lc.fits'
 #badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28967/hlsp_everest_k2_llc_229228967-c08_kepler_v2.0_lc.fits'
 okayFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28386/hlsp_everest_k2_llc_229228386-c08_kepler_v2.0_lc.fits'
+testFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28407/hlsp_everest_k2_llc_229228407-c08_kepler_v2.0_lc.fits'
+weirdFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28726/hlsp_everest_k2_llc_229228726-c08_kepler_v2.0_lc.fits' #maxes not being found by my func
 
 def findMultipleP(files, name, gen_plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30):
     '''
@@ -82,8 +85,8 @@ def ACFfindMultipleP(files, name, gen_plots=False, gen_file_type='.png', gen_min
     lis = []
     for file_name in files:
         lis.append(ACFfindP(file_name, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
-    output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Max Autocorrelation'])
-    #output.to_csv('/Volumes/Zoe Bell Backup/ACFfindPOutput/' + name + '.csv')
+    output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Autocorrelation Ratio'])
+    output.to_csv('/Volumes/Zoe Bell Backup/ACFfindPOutput/' + name + '.csv')
     return output
 
 def ACFfindP(file_name, plots=False, file_type='.png', min_period = 0.1, max_period = 30):
@@ -104,43 +107,73 @@ def ACFfindP(file_name, plots=False, file_type='.png', min_period = 0.1, max_per
 
     arr = sig.correlate(fcor_median,fcor_median, mode='full')
     ACF = arr[N-1:]
+    baseline_ACF = ACF[0]
 
     okP = np.where(((t_range>min_period) & (t_range<max_period)))
     t_search = t_range[okP]
     ACF_search = ACF[okP]
 
+    #print(findMaxes(t_search, ACF_search))
+
     #box_width = findWidthAtHalfMax(t_search, ACF_search)
     #print(box_width)
 
     #ACF_search = convolve(ACF_search, Box1DKernel(box_width*2))
-    ACF_search = convolve(ACF_search, Box1DKernel(100)) # 200 good
+    ACF_search = convolve(ACF_search, Box1DKernel(100)) # 200 good; automatically does linear_interp, can change mode='center'
+    
+    #print(findMaxes(t_search, ACF_search))
 
     #peaks = sig.argrelmax(np.array([t_search, ACF_search]))
     #peaks = sig.find_peaks(ACF_search, threshold=np.max(ACF_search)/100)
     #peaks = sig.find_peaks(ACF_search, prominence=100000) #is this always going to be a good prominence threshold? (nope)
     #peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/10)
-    peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/100)
-    first_peak = peaks[0]
-    best_period = t_search[first_peak]
-    max_ACF = ACF[first_peak]
+    #peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/100) #best
+
+    #peaks = findMaxes(t_search, ACF_search)
+    #first_peak = -1
+    #if len(peaks)>1:
+        #first_peak = peaks[1]
+    maxes = findMaxes(t_search, ACF_search)
+    periods = maxes[0]
+    ACFs = maxes[1]
+    #best_period = -1
+    #max_ACF = -1
+    if len(periods)<2:
+        return [name, -1, -1, periods]
+    max_ACF = np.max(ACFs[1:])
+    
+    linPossible = len(periods)>2
+    if linPossible:
+        linInfo = stats.linregress(range(len(periods)-1), periods[1:])
+        linSlope = linInfo[0] # /actual best period
+        linIntercept = linInfo[1]
+    else:
+        linSlope = periods[1]
 
     if(plots):
         plt.figure(figsize=(10,7))
 
         plt.subplot(211)
-        plt.title('Unsmoothed')
-        plt.xlabel('Time Shift')
+        plt.title('Unsmoothed v. Smoothed')
+        plt.xlabel('Time Shift (days)')
         plt.ylabel('Autocorrelation')
         plt.plot(t_range, ACF)
-
-        plt.subplot(212)
-        plt.title('Smoothed')
-        plt.xlabel('Time Shift')
-        plt.ylabel('Autocorrelation')
         plt.plot(t_search, ACF_search)
 
+        if linPossible:
+            plt.subplot(212)
+            plt.title('Maxes with the Best Period ' + format(linSlope, '.2f'))
+            plt.xlabel('Index')
+            plt.ylabel('Time Shift (days)')
+            plt.plot(periods[1:], 'bo')
+            x = range(len(periods)-1)
+            y = []
+            for x_val in x:
+                y.append(linIntercept + linSlope*x_val)
+            plt.plot(x, y)
+
         formated_periods = []
-        for n in best_period[:10]:
+        for n in periods[:10]:
             formated_periods.append(format(n, '.2f'))
 
         plt.suptitle(formated_periods)
@@ -149,7 +182,33 @@ def ACFfindP(file_name, plots=False, file_type='.png', min_period = 0.1, max_per
         plt.savefig('ACFPlotOutputs/' + name + file_type, dpi=150)
         plt.close()
 
-    return [name, best_period, max_ACF]
+    #return [name, best_period, max_ACF]
+    return [name, linSlope, max_ACF/baseline_ACF]
+
+def findMaxes(t_search, ACF_search):
+    grad = np.gradient(ACF_search)
+    zeros = []
+    #for i in range(len(grad)):
+        #if np.abs(grad[i]) < 200: #np.float_power(1, -10000)
+        #if np.around(grad[i]) == 0.0:
+            #zeros.append(i)
+    #maxes = []
+    for i in range(5, len(grad)-5): # orginally one not five
+        if (grad[i-5]>0) & (grad[i+5]<0):
+            if (len(zeros)>0):
+                if (t_search[i]-t_search[zeros[-1]]) > 1: #only counting maxes at least one day away from each other
+                    zeros.append(i)
+            else:
+                zeros.append(i)
+    
+    #why am I getting mins too??!
+    gradSnd = np.gradient(grad)
+    maxes = []
+    for zero in zeros:
+        if gradSnd[zero]<0:
+            maxes.append(zero)
+    
+    return [t_search[maxes], ACF_search[maxes]]
 
 def findWidthAtHalfMax(t_search, ACF_search):
     max = ACF_search[0]
@@ -160,10 +219,18 @@ def findWidthAtHalfMax(t_search, ACF_search):
             break
     return t_search[index]
 
+# average over spacing of peaks—-graph
+# check outputs against lomb-scargle
+# 
+# look at 2013 paper for how to use ACF (use same limits)
+
+# scipy spline to smooth, pandas rolling/running stats package for media (like boxcar for mean)
+# check boxcar (why artifact at beginning?)
 # write func that calcs derivs and finds zeros and neg curvature
+
+
 # boxcar smooth (running average) for gross ones
 # use full width at half max for box size
-# look at 2013 paper for how to use ACF (use same limits)
 # save plot files
 
 # N = npsize(fcor)
