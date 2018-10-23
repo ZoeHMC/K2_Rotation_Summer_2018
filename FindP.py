@@ -17,19 +17,24 @@ badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28995/hlsp_everest_k2_
 #badFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28967/hlsp_everest_k2_llc_229228967-c08_kepler_v2.0_lc.fits'
 okayFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28386/hlsp_everest_k2_llc_229228386-c08_kepler_v2.0_lc.fits'
 testFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28407/hlsp_everest_k2_llc_229228407-c08_kepler_v2.0_lc.fits'
-weirdFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28726/hlsp_everest_k2_llc_229228726-c08_kepler_v2.0_lc.fits' #maxes not being found by my func
+weirdFile = '/Volumes/Zoe Bell Backup/everest/c08/229200000/28726/hlsp_everest_k2_llc_229228726-c08_kepler_v2.0_lc.fits' #maxes weren't being found by my func (now are)
 
+campaign0files = glob.glob('/Volumes/Zoe Bell Backup/everest/c00/*/*/*.fits')
 campaign5files = glob.glob('/Volumes/Zoe Bell Backup/everest/c05/*/*/*.fits')
 campaign7files = glob.glob('/Volumes/Zoe Bell Backup/everest/c07/*/*/*.fits')
 campaign8files = glob.glob('/Volumes/Zoe Bell Backup/everest/c08/*/*/*.fits')
-
+campaign13files = glob.glob('/Volumes/Zoe Bell Backup/everest/c13/*/*/*.fits')
+ 
 def mergeFiles(campaign_output_file_name, root_dir = '/Volumes/Zoe Bell Backup/'): # implicit assumption using nearest instance of non-unique row
     '''
     Takes the file name (including extension) of an output of bothFindP and optionally the root directory where this file and the everest files are saved.
     Merges the GAIA data for K2 with the output of bothFindP, saves this as a .csv file in the bothFindPOutput folder in the same root directory, 
-    and returns it as a pandas dataframe. Before doing so, eliminates duplicate rows in the GAIA data, taking the one with the lowest angular distance.
+    and returns it as a pandas dataframe. Before doing so, eliminates duplicate rows in the GAIA data, taking the one with the lowest angular distance. 
+    Assumes the GAIA data is saved in the root directory as k2_dr2_1arcsec.fits and the bothFindP output is stored in the BothFindPOutput folder in the 
+    root directory.
     '''
-    k2_dr2 = Table.read(root_dir + 'everest/c08/k2_dr2_1arcsec.fits', format='fits')
+    k2_dr2 = Table.read(root_dir + 'k2_dr2_1arcsec.fits', format='fits')
+    #k2_dr2 = Table.read(root_dir + 'everest/c08/k2_dr2_1arcsec.fits', format='fits')
     k2_dr2 = k2_dr2.to_pandas()
     ss = np.argsort(k2_dr2['k2_gaia_ang_dist'])
     uu = np.unique(k2_dr2['epic_number'].values[ss], return_index=True)[1]
@@ -39,11 +44,8 @@ def mergeFiles(campaign_output_file_name, root_dir = '/Volumes/Zoe Bell Backup/'
     name_column = pd.to_numeric(name_column)
     campaign_output = campaign_output.assign(epic_number=name_column)
     merged_output = campaign_output.merge(good_k2_dr2, left_on='epic_number', right_on='epic_number')
-    #uu = np.unique(merged_output['epic_number'].values, return_index=True)[1]
     merged_output.to_csv(root_dir + 'BothFindPOutput/Merged' + campaign_output_file_name)
     return merged_output
-
-# run np.unique on the epic # column
 
 def concatenateFiles(merged_output_lis):
     '''
@@ -55,14 +57,14 @@ def concatenateFiles(merged_output_lis):
             concatenated_file = concatenated_file.append(merged_output_lis[i])
     return concatenated_file
 
-def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1, linear=False, LS=False, ACF=False, root_dir='/Volumes/Zoe Bell Backup/'):
+def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1, linear=False, close_only=False, LS=False, ACF=False, root_dir='/Volumes/Zoe Bell Backup/'):
     '''
     Takes the output of mergeFiles (or concatenateFiles) and a string name for the corresponding campaign(s) and prints and saves the following plots: 
     a comparison of LS Best Period, ACF First Period, and ACF Linear Period, Period v. BP-RP, a histogram of periods for BP-RP>=0.2, and M_G v. BP-RP colored by period.
     Several quality cuts are made to the data for the latter three plots. Optionally takes the lower and upper thresholds for selecting the data (if both equal 0.1, 
-    then selects stars with LS and ACF periods within 10% of each other), whether to use the linear or first ACF period, whether to just consider LS periods using 
-    the false alarm probability for selecting data, whether to just consider ACF periods using the ACF ratio for selection data, and the root directory in which to 
-    save the plots within the folder Plots!.
+    then selects stars with LS and ACF periods within 10% of each other), whether to use the linear or first ACF period (with boolean linear), whether to only look at 
+    stars within 300 parsecs (with boolean close_only), whether to just consider LS periods using the false alarm probability for selecting data (with boolean LS), whether 
+    to just consider ACF periods using the ACF ratio for selection data (with boolean ACF), and the root directory in which to save the plots within the folder Plots!.
     '''
     plt.figure(figsize=(10,7))
 
@@ -74,6 +76,12 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
 
     low_prob = np.where(merged_output['False Alarm Prob']==0.0) #gets 4000 stars w/ campaign 8 with ==0.0     ##
     high_ACF = np.where(merged_output['Autocorrelation Ratio']>=0.26)  #0.26 gets 4000 stars w/ campaign 8
+
+    close = np.where(merged_output['r_est']<=300)
+    if close_only:
+        log_LS_period = log_LS_period.values[close]
+        log_ACF_first_period = log_ACF_first_period.values[close]
+        log_ACF_best_period = log_ACF_best_period.values[close]
 
     plt.subplot(221)
     plt.plot(log_LS_period, log_ACF_first_period, 'bo', alpha=0.1)
@@ -172,6 +180,10 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
                         (merged_output[u'phot_rp_mean_flux_error']/merged_output[u'phot_rp_mean_flux'] < 0.01) & 
                         (merged_output[u'phot_g_mean_flux_error']/merged_output[u'phot_g_mean_flux'] < 0.01) &
                         (M_G>=4))[0]
+    
+    if close_only:
+        r_est = merged_output[u'r_est'].values[good]
+        good = good[np.where((r_est <= 300.))[0]]
 
     selected_LS_periods = merged_output['LS Best Period'].values[good]
     if linear:
@@ -179,20 +191,12 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
     else:
         selected_ACF_periods = merged_output['ACF First Period'].values[good]
     
-    #plt.plot(np.log10(selected_LS_periods), np.log10(selected_ACF_periods), 'bo', alpha=0.1)
-    #plt.plot(x, x,lw=3, color='g')
-    #plt.plot(x, x+np.log10(1-threshold), 'g--')
-    #plt.plot(x, x+np.log10(1+threshold), 'g--')
-    #plt.xlabel('log(LS Best Period)')
-    #plt.ylabel('log(ACF First Period)')
-    #plt.show()
-
     bp_rp = merged_output['bp_rp'].values[good]
     #plt.figure(figsize=(7,4))                                  ###
     if LS:
-        plt.plot(bp_rp, selected_LS_periods, 'bo', alpha=0.1) # change to alpha=0.05 for combos
+        plt.plot(bp_rp, selected_LS_periods, 'bo', alpha=0.05) # change to alpha=0.05 for combos
     else:
-        plt.plot(bp_rp, selected_ACF_periods, 'bo', alpha=0.1) # change to alpha=0.05 for combos
+        plt.plot(bp_rp, selected_ACF_periods, 'bo', alpha=0.05) # change to alpha=0.05 for combos
     plt.yscale('log')
     #plt.xlim(0.5,2.7)                                          ###
     #plt.ylim(1,100)                                            ###
@@ -202,7 +206,6 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
         plt.savefig(root_dir + 'Plots!/' + campaign + ' LS Period v. BP-RP with Lower Threshold = ' + str(lower_threshold) + ' and Upper Threshold = ' + str(upper_threshold) + '.png', dpi=150)
     else:
         name = root_dir + 'Plots!/' + campaign
-        #plt.ylabel('LS Best Period')
         if linear:
             plt.ylabel('ACF Linear Period')
             name = name + ' Linear'
@@ -221,8 +224,6 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
         plt.savefig(root_dir + 'Plots!/' + campaign + ' LS Period Histogram with Lower Threshold = ' + str(lower_threshold) + ' and Upper Threshold = ' + str(upper_threshold) + '.png', dpi=150)
     else:
         name = root_dir + 'Plots!/' + campaign
-        #plt.xlabel('LS Best Period (where bp_rp>=2)')
-        #plt.hist(selected_LS_periods[ok], bins=15)
         plt.hist(selected_ACF_periods[ok], bins=15)
         if linear:
             plt.xlabel('ACF Linear Period (where bp_rp>=2)')
@@ -248,7 +249,6 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
         plt.savefig(root_dir + 'Plots!/' + campaign + ' LS M_G v. BP-RP with Lower Threshold = ' + str(lower_threshold) + ' and Upper Threshold = ' + str(upper_threshold) + '.png', dpi=150)
     else:
         name = root_dir + 'Plots!/' + campaign
-        #cb.set_label('LS Best Period (days)')
         if linear:
             cb.set_label('ACF Linear Period (days)')
             name = name + ' Linear'
@@ -260,11 +260,12 @@ def makePlots(merged_output, campaign, lower_threshold=0.1, upper_threshold=0.1,
             plt.savefig(name + ' M_G v. BP-RP with Lower Threshold = ' + str(lower_threshold) + ' and Upper Threshold = ' + str(upper_threshold) + '.png', dpi=150)
     plt.show()
 
-def bothFindP(files, output_name, gen_LSplots=False, gen_ACFplots=False, gen_file_type='.png', gen_min_period=0.1, gen_max_period=30, gen_min_max_distance=1, gen_medfilt_kernel_size=11, gen_fcor_box_kernel_size=11, gen_acf_box_kernal_size=100, root_dir = '/Volumes/Zoe Bell Backup/'):
+def bothFindP(files, output_name, gen_LSplots=False, gen_ACFplots=False, gen_file_type='.png', gen_min_period=0.1, gen_max_period=30, gen_min_max_distance=1, gen_medfilt_kernel_size=11, gen_fcor_box_kernel_size=11, gen_acf_box_kernal_size=100, gen_root_dir = '/Volumes/Zoe Bell Backup/'):
     '''
-    Takes the name of a .fits file from the Everest K2 data and the data from that file read into a table,
-    and optionally whether you want a plot saved, the file type you want it saved as, the minimum and maximum periods you want to look for, 
-    the minimum distance between maxes in the ACF you want to consider, and several kernal sizes of various filters and smoothing functions.
+    Takes a list of file names for .fits files from the Everest K2 data and a name for the output file,
+    and optionally whether you want LS or ACF plots saved, the file type you want it saved as, the minimum and maximum periods you want to look for, 
+    the minimum distance between maxes in the ACF you want to consider, several kernal sizes of various filters and smoothing functions, and the 
+    root directory in which to save the output .csv file within the folder BothFindPOutput.
     Returns the outputs of LSfindP and ACFfindP for each file in a list and saves them in a .csv file with the following headers: 
     'File Name', 'LS Best Period', 'Max Power', 'False Alarm Prob', 'ACF Best Period', 'ACF First Period', 'Autocorrelation Ratio', and 'Peaks List.'
     '''
@@ -274,18 +275,19 @@ def bothFindP(files, output_name, gen_LSplots=False, gen_ACFplots=False, gen_fil
         start = file_name.rfind('/') + 1
         name = file_name[start:-5]
         data = Table.read(file_name, format='fits')
-        new_row = LSfindP(name, data, plots=gen_LSplots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period) + ACFfindP(name, data, plots=gen_ACFplots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period, min_max_distance=gen_min_max_distance, fcor_box_kernel_size=gen_fcor_box_kernel_size, acf_box_kernal_size=gen_acf_box_kernal_size)[1:]
+        new_row = LSfindP(name, data, plots=gen_LSplots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period, root_dir=gen_root_dir) + ACFfindP(name, data, plots=gen_ACFplots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period, min_max_distance=gen_min_max_distance, fcor_box_kernel_size=gen_fcor_box_kernel_size, acf_box_kernal_size=gen_acf_box_kernal_size, root_dir=gen_root_dir)[1:]
         lis.append(new_row)
     output = pd.DataFrame(data=lis, columns=['File Name', 'LS Best Period', 'Max Power', 'False Alarm Prob', 'ACF Best Period', 'ACF First Period', 'Autocorrelation Ratio', 'Peaks List'])
-    output.to_csv(root_dir + 'BothFindPOutput/' + output_name + '.csv')
+    output.to_csv(gen_root_dir + 'BothFindPOutput/' + output_name + '.csv')
     end_time = time.clock()
     print(str(end_time-start_time) + ' seconds')
     return output
 
-def LSfindMultipleP(files, output_name, gen_plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30, root_dir = '/Volumes/Zoe Bell Backup/'):
+def LSfindMultipleP(files, output_name, gen_plots=False, gen_file_type='.png', gen_min_period = 0.1, gen_max_period = 30, gen_root_dir = '/Volumes/Zoe Bell Backup/'):
     '''
     Takes a list of file names for .fits files from the Everest K2 data and a name for the output file, and optionally
-    whether you want plots saved, the file type you want them saved as, and the minimum and maximum periods you want to look for.
+    whether you want plots saved, the file type you want them saved as, the minimum and maximum periods you want to look for, 
+    and the root directory in which to save the output .csv within the folder FindPOutput.
     Returns the output of LSfindP for each file in a list and saves them in a .csv file.
     '''
     lis = []
@@ -293,15 +295,16 @@ def LSfindMultipleP(files, output_name, gen_plots=False, gen_file_type='.png', g
         start = file_name.rfind('/') + 1
         name = file_name[start:-5]
         data = Table.read(file_name, format='fits')
-        lis.append(LSfindP(name, data, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period))
+        lis.append(LSfindP(name, data, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period, root_dir=gen_root_dir))
     output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period','Max Power','False Alarm Prob'])
-    output.to_csv(root_dir + 'FindPOutput/' + output_name + '.csv')
+    output.to_csv(gen_root_dir + 'FindPOutput/' + output_name + '.csv')
     return output
 
 def LSfindP(file_name, data, plots=False, file_type='.png', min_period = 0.1, max_period = 30, root_dir = '/Volumes/Zoe Bell Backup/'):
     '''
-    Takes the name of a .fits file from the Everest K2 data and the data from that file read into a table,
-    and optionally whether you want a plot saved, the file type you want it saved as, and the minimum and maximum periods you want to look for.
+    Takes the name of a .fits file (without the extension) from the Everest K2 data and the data from that file read into a table,
+    and optionally whether you want a plot saved, the file type you want it saved as, the minimum and maximum periods you want to look for, 
+    and the root directory in which to save the plot within the folder LSPlotOutputs.
     Uses the Lomb-Scargle periodogram method to return the file name, the period that best fits the corrected flux data in that range, 
     the power at that period, and the associated false alarm probability.
     '''
@@ -344,16 +347,17 @@ def LSfindP(file_name, data, plots=False, file_type='.png', min_period = 0.1, ma
         plt.suptitle(name)
         plt.tight_layout()
         plt.subplots_adjust(top=0.9)
-        plt.savefig(root_dir + 'LSPlotOutputs/' + name + file_type, dpi=150) # '/Vol/.../...'
+        plt.savefig(root_dir + 'LSPlotOutputs/' + name + file_type, dpi=150)
         plt.close()
 
     return [name, 1/best_freq, max_power, ls.false_alarm_probability(max_power)]
 
-def ACFfindMultipleP(files, output_name, gen_plots=False, gen_file_type='.png', gen_min_period=0.1, gen_max_period=30, gen_min_max_distance=0.2, gen_medfilt_kernel_size=11, gen_fcor_box_kernel_size=11, gen_acf_box_kernal_size=100, root_dir = '/Volumes/Zoe Bell Backup/'):
+def ACFfindMultipleP(files, output_name, gen_plots=False, gen_file_type='.png', gen_min_period=0.1, gen_max_period=30, gen_min_max_distance=0.2, gen_medfilt_kernel_size=11, gen_fcor_box_kernel_size=11, gen_acf_box_kernal_size=100, gen_root_dir = '/Volumes/Zoe Bell Backup/'):
     '''
-    Takes the name of a .fits file from the Everest K2 data and the data from that file read into a table,
-    and optionally whether you want a plot saved, the file type you want it saved as, the minimum and maximum periods you want to look for, 
-    the minimum distance between maxes in the ACF you want to consider, and several kernal sizes of various filters and smoothing functions.
+    Takes a list of file names for .fits files from the Everest K2 data and a name for the output file, 
+    and optionally whether you want plots saved, the file type you want it saved as, the minimum and maximum periods you want to look for, 
+    the minimum distance between maxes in the ACF you want to consider, several kernal sizes of various filters and smoothing functions, 
+    and the root directory in which to save the output .csv within the folder ACFfindPOutput.
     Returns the output of ACFfindP for each file in a list and saves them in a .csv file.
     '''
     start_time = time.clock()
@@ -362,18 +366,19 @@ def ACFfindMultipleP(files, output_name, gen_plots=False, gen_file_type='.png', 
         start = file_name.rfind('/') + 1
         name = file_name[start:-5]
         data = Table.read(file_name, format='fits')
-        lis.append(ACFfindP(name, data, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period, min_max_distance=gen_min_max_distance, fcor_box_kernel_size=gen_fcor_box_kernel_size, acf_box_kernal_size=gen_acf_box_kernal_size))
+        lis.append(ACFfindP(name, data, plots=gen_plots, file_type=gen_file_type, min_period=gen_min_period, max_period=gen_max_period, min_max_distance=gen_min_max_distance, fcor_box_kernel_size=gen_fcor_box_kernel_size, acf_box_kernal_size=gen_acf_box_kernal_size, root_dir=gen_root_dir))
     output = pd.DataFrame(data=lis, columns=['File Name', 'Best Period', 'First Period', 'Autocorrelation Ratio', 'Period List'])
-    output.to_csv(root_dir + 'ACFfindPOutput/' + output_name + '.csv')
+    output.to_csv(gen_root_dir + 'ACFfindPOutput/' + output_name + '.csv')
     end_time = time.clock()
     print(str(end_time-start_time) + ' seconds')
     return output
 
-def ACFfindP(file_name, data, plots=False, file_type='.png', min_period=0.1, max_period=30, min_max_distance=0.2, medfilt_kernel_size=11, fcor_box_kernel_size=11, acf_box_kernal_size=100, root_dir = '/Volumes/Zoe Bell Backup/'): #maybe default should be 40?
+def ACFfindP(file_name, data, plots=False, file_type='.png', min_period=0.1, max_period=30, min_max_distance=0.22, medfilt_kernel_size=11, fcor_box_kernel_size=11, acf_box_kernal_size=100, root_dir = '/Volumes/Zoe Bell Backup/'): #maybe default should be 40?
     '''
-    Takes the name of a .fits file from the Everest K2 data and the data from that file read into a table,
+    Takes the name of a .fits file (without the extension) from the Everest K2 data and the data from that file read into a table,
     and optionally whether you want a plot saved, the file type you want it saved as, the minimum and maximum periods you want to look for, 
-    the minimum distance between maxes in the ACF you want to consider, and several kernal sizes of various filters and smoothing functions.
+    the minimum distance between maxes in the ACF you want to consider, several kernal sizes of various filters and smoothing functions, 
+    and the root directory in which to save the plot within the folder ACFPlotOutputs.
     Uses the Auto-Correlation Function method to return the file name, the period that best fits the corrected flux data in that range (based on all maxes found), 
     the first peak found, the ratio of the autocorrelation magnitude of the highest peak to the magnitude when shifted by zero, and the first 10 peaks found.
     '''
@@ -386,14 +391,20 @@ def ACFfindP(file_name, data, plots=False, file_type='.png', min_period=0.1, max
 
     t = np.array(data['TIME'][ok])
     fcor = list(data['FCOR'][ok])
-    #fcor_median = fcor - np.median(fcor)
     fcor_median = fcor/np.median(fcor)-1
     fcor_median = sig.medfilt(fcor_median, kernel_size=medfilt_kernel_size)
     fcor_median = convolve(fcor_median, Box1DKernel(fcor_box_kernel_size, mode='center'))
 
     N = len(fcor)
-    t_step = np.nanmedian(t[1:]-t[0:-1]) # 29.4 min expected
+    # t_step = np.nanmedian(t[1:]-t[0:-1]) # 29.4 min expected but this ended up chronically giving us too short overall time frames
+    t_step = (np.nanmax(t) - np.nanmin(t)) / np.float(np.size(t))
     t_range = np.arange(N)*t_step
+
+    print(t_step)
+    plt.plot((t-t[0]) - t_range)
+    plt.xlabel('Data Point')
+    plt.ylabel('Actual Time Elapsed - Regularized Time Elapsed (Days)')
+    plt.show()
 
     arr = sig.correlate(fcor_median,fcor_median, mode='full')
     ACF = arr[N-1:]
@@ -403,36 +414,14 @@ def ACFfindP(file_name, data, plots=False, file_type='.png', min_period=0.1, max
     t_search = t_range[okP]
     ACF_search = ACF[okP]
 
-    #print(findMaxes(t_search, ACF_search))
-
-    #box_width = findWidthAtHalfMax(t_search, ACF_search)
-    #print(box_width)
-
-    #ACF_search = convolve(ACF_search, Box1DKernel(box_width*2))
     ACF_search = convolve(ACF_search, Box1DKernel(acf_box_kernal_size)) # 200 good; automatically does linear_interp, can change mode='center'
-    #ACF_search = convolve(ACF_search, Gaussian1DKernel(7.6439, x_size=57)) #sigma corresponds to a FWHM of 18 divided by sqrt(8*ln(2))
-    #ACF_search = convolve(ACF_search, Gaussian1DKernel(15, x_size=57)) #sigma corresponds to a FWHM of 18 divided by sqrt(8*ln(2))
-
-    #print(findMaxes(t_search, ACF_search))
-
-    #peaks = sig.argrelmax(np.array([t_search, ACF_search]))
-    #peaks = sig.find_peaks(ACF_search, threshold=np.max(ACF_search)/100)
-    #peaks = sig.find_peaks(ACF_search, prominence=100000) #is this always going to be a good prominence threshold? (nope)
-    #peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/10)
-    #peaks = sig.find_peaks(ACF_search, prominence=np.max(ACF_search)/100) #best
-
-    #peaks = findMaxes(t_search, ACF_search)
-    #first_peak = -1
-    #if len(peaks)>1:
-        #first_peak = peaks[1]
+    
     maxes = findMaxes(t_search, ACF_search, min_max_distance)
     periods = maxes[0]
     ACFs = maxes[1]
     first_peak = -1
     if len(periods)>1:
         first_peak = periods[1]
-    #best_period = -1
-    #max_ACF = -1
     if len(periods)<2:
         if(plots):
             plt.figure(figsize=(10,7))
@@ -496,9 +485,7 @@ def ACFfindP(file_name, data, plots=False, file_type='.png', min_period=0.1, max
         plt.subplots_adjust(top=0.9)
         plt.savefig(root_dir + 'ACFPlotOutputs/' + name + file_type, dpi=150)
         plt.close()
-        #plt.show()
-
-    #return [name, best_period, max_ACF]
+    
     return [name, linSlope, first_peak, max_ACF/baseline_ACF, periods[:10]]
 
 def findMaxes(t_search, ACF_search, min_max_distance):
@@ -508,11 +495,6 @@ def findMaxes(t_search, ACF_search, min_max_distance):
     '''
     grad = np.gradient(ACF_search)
     zeros = []
-    #for i in range(len(grad)):
-        #if np.abs(grad[i]) < 200: #np.float_power(1, -10000)
-        #if np.around(grad[i]) == 0.0:
-            #zeros.append(i)
-    #maxes = []
     for i in range(5, len(grad)-5): # orginally 1 not 5
         if (grad[i-5]>0) & (grad[i+5]<0):
             if (len(zeros)>0):
@@ -528,7 +510,6 @@ def findMaxes(t_search, ACF_search, min_max_distance):
             maxes.append(zero)
     
     return [t_search[maxes], ACF_search[maxes]]
-    #return [t_search[zeros], ACF_search[zeros]]
 
 def findWidthAtHalfMax(t_search, ACF_search):
     max = ACF_search[0]
@@ -539,13 +520,22 @@ def findWidthAtHalfMax(t_search, ACF_search):
             break
     return t_search[index]
 
+# get things onto GitHub
+# fine-tune where statement
+# get things within 10% of ACF/LS median
+# commenting/README
+# r_est do within 200-300 parsecs
+# look at ACF plot, put vertical line down where period is predicted -- nothing looks weird
+# look at actual v. regularized time elapsed -- by end, 8-10 more days have passed according to actual
+# put in Guassian for peaks
+
+# took 5,290.2 secs (about 1 hour and 30 min) to run bothFindP with all plots on 7,748 files (all of campaign 0)
+# took 14,624.8 secs (about 4 hours) to run bothFindP with all plots on 21,407 files (all of campaign 13)
+
 # grab plus 10 (5) minus 20 (25)
 # assume Lomb-Scargle is right
-# look at ACF plot, put vertical line down where period is predicted
-# put in Guassian for peaks
-# commenting/README
-# rs do within 200-300 parsecs
 
+# POSTER STUFF
 # save as dpi = 300 for poster printing
 # funding for poster: 'This work was supported by an NSF Astronomy and Astrophysics Postdoctoral Fellowship under award AST-1501418.'
 
@@ -625,53 +615,3 @@ def findWidthAtHalfMax(t_search, ACF_search):
 
 
 
-
-'''
-data = Table.read(dir + file, format='fits')
-ok = np.where((data['QUALITY']==0) & (np.isfinite(data['TIME'])) & (np.isfinite(data['FLUX']) & (np.isfinite(data['FRAW_ERR']))))
-
-
-plt.figure()
-plt.plot(data['TIME'][ok], data['FLUX'][ok])
-plt.show()
-
-
-t = np.array(data['TIME'][ok])
-flux = np.array(data['FLUX'][ok])
-frawErr = np.array(data['FRAW_ERR'][ok])
-freq, power = LombScargle(t, flux, frawErr).autopower(minimum_frequency=1/30, maximum_frequency=1/0.1)
-plt.plot(1/freq, power)
-plt.xscale('log')
-plt.show()
-
-bestFreq = freq[np.argmax(power)]
-t_fit = np.linspace(2555,2640)
-y_fit = LombScargle(t, flux, frawErr).model(t_fit, bestFreq)
-plt.plot(t_fit, y_fit)
-plt.plot(t, flux)
-plt.show()
-
-ls = LombScargle(t, flux, frawErr)
-freq, power = ls.autopower(minimum_frequency=1/30, maximum_frequency=1/0.1)
-ls.false_alarm_probability(np.max(power))
-
-
-
-t = np.array(data['TIME'][ok])
-fraw = np.array(data['FRAW'][ok])
-frawErr = np.array(data['FRAW_ERR'][ok])
-freq, power = LombScargle(t, fraw, frawErr).autopower()
-plt.plot(freq, power)
-plt.show()
-
-bestFreq = freq[np.argmax(power)]
-t_fit = np.linspace(2555,2640)
-y_fit = LombScargle(t, fraw, frawErr).model(t_fit, bestFreq)
-plt.plot(t_fit, y_fit)
-plt.plot(t, fraw)
-plt.show()
-
-ls = LombScargle(t, fraw, frawErr)
-freq, power = ls.autopower()
-ls.false_alarm_probability(power.max())
-'''
